@@ -107,7 +107,7 @@ services:
       APACHE_LOG_LEVEL: debug
       APACHE_BACKEND_HOST: php
       APACHE_VHOST_PRESET: php
-      APACHE_DOCUMENT_ROOT: /var/www/html/web
+      APACHE_DOCUMENT_ROOT: /var/www/html/public
     volumes:
       - ./project:/var/www/html:cached
 # Alternative for macOS users: Mutagen https://wodby.com/docs/stacks/drupal/local#docker-for-mac

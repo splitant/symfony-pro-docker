@@ -5,6 +5,15 @@ default: help
 COMPOSER_ROOT ?= /var/www/html
 SYMFONY_ROOT ?= /var/www/html/web
 DESKTOP_PATH ?= ~/Desktop/
+DOCKER_PHP_ID := $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}")
+
+ifneq ($(SYMFONY_VERSION),)
+SYMFONY_VERSION := --version=$(SYMFONY_VERSION)
+endif
+
+ifeq ($(SYMFONY_API),)
+SYMFONY_API := --webapp
+endif
 
 ## help	:	Print commands help.
 .PHONY: help
@@ -68,14 +77,7 @@ shell:
 ##		For example: make composer "update drupal/core --with-dependencies"
 .PHONY: composer
 composer:
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") composer --working-dir=$(COMPOSER_ROOT) $(filter-out $@,$(MAKECMDGOALS))
-
-## drush	:	Executes `drush` command in a specified `DRUPAL_ROOT` directory (default is `/var/www/html/web`).
-##		To use "--flag" arguments include them in quotation marks.
-##		For example: make drush "watchdog:show --type=cron"
-.PHONY: drush
-drush:
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") drush -r $(DRUPAL_ROOT) $(filter-out $@,$(MAKECMDGOALS))
+	docker exec $(DOCKER_PHP_ID) composer --working-dir=$(COMPOSER_ROOT) $(filter-out $@,$(MAKECMDGOALS))
 
 ## logs	:	View containers logs.
 ##		You can optinally pass an argument with the service name to limit logs
@@ -88,13 +90,13 @@ logs:
 .PHONY: create-setup
 create-setup:
 ##		For example: make create-setup "<project_name> <repo-git>"
-	cp -R ${DESKTOP_PATH}drupal-pro-docker ${DESKTOP_PATH}$(word 2, $(MAKECMDGOALS))-docker
+	cp -R ${DESKTOP_PATH}symfony-pro-docker ${DESKTOP_PATH}$(word 2, $(MAKECMDGOALS))-docker
 	git clone $(word 3, $(MAKECMDGOALS)) ${DESKTOP_PATH}$(word 2, $(MAKECMDGOALS))-docker/project
 
 .PHONY: setup
 setup:
 	$(MAKE) vendor
-	$(MAKE) copy-files
+	$(MAKE) copy-pre-commit
 	$(MAKE) drupal-install
 	$(MAKE) packages
 	$(MAKE) build
@@ -102,53 +104,32 @@ setup:
 .PHONY: create-init
 create-init:
 ##		For example: make create-init "<project_name>"
-	cp -R ${DESKTOP_PATH}drupal-pro-docker ${DESKTOP_PATH}$(word 2, $(MAKECMDGOALS))-docker
+	cp -R ${DESKTOP_PATH}symfony-pro-docker ${DESKTOP_PATH}$(word 2, $(MAKECMDGOALS))-docker
 	mkdir ${DESKTOP_PATH}$(word 2, $(MAKECMDGOALS))-docker/project
 
 .PHONY: init
 init:
+	$(MAKE) download-symfony
 	$(MAKE) create-project
-	$(MAKE) vendor
-	$(MAKE) drupal-init
 
-.PHONY: pull
-pull:
-	$(MAKE) drush-cex
-	$(MAKE) vendor
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") drush -r $(DRUPAL_ROOT) updatedb -y
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") drush -r $(DRUPAL_ROOT) config:import -y
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") drush -r $(DRUPAL_ROOT) locale:check
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") drush -r $(DRUPAL_ROOT) locale:update
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") drush -r $(DRUPAL_ROOT) cache:rebuild
-
-.PHONY: drush-cex
-drush-cex:
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") drush -r $(DRUPAL_ROOT) config:export -y --destination=./export
-
-.PHONY: vendor
-vendor:
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") composer --working-dir=$(COMPOSER_ROOT) install -o
+.PHONY: download-symfony
+download-symfony:
+	docker exec -i $(DOCKER_PHP_ID) curl -1sLf 'https://dl.cloudsmith.io/public/symfony/stable/setup.alpine.sh' | docker exec -i -u root $(DOCKER_PHP_ID) bash
+	docker exec -u root $(DOCKER_PHP_ID) sudo apk add symfony-cli
 
 .PHONY: create-project
 create-project:
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") rmdir front
-ifeq ($(DRUPAL_VER),latest)
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") composer --working-dir=$(COMPOSER_ROOT) create-project drupal/recommended-project ./
-else
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") composer --working-dir=$(COMPOSER_ROOT) create-project drupal/recommended-project:${DRUPAL_VER} ./
-endif
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") mkdir front
+	docker exec $(DOCKER_PHP_ID) symfony new $(SYMFONY_VERSION) $(SYMFONY_API) ./
 # Find a better solution (chown -R wodby:www-data web/sites/default/files ?)
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") chmod -R 777 web/sites/default/files
+#	docker exec $(DOCKER_PHP_ID) chmod -R 777 web/sites/default/files
+
+.PHONY: vendor
+vendor:
+	docker exec $(DOCKER_PHP_ID) composer --working-dir=$(COMPOSER_ROOT) install --no-interaction
 	
 .PHONY: gitlab-auth
 gitlab-auth:
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") composer --working-dir=$(COMPOSER_ROOT) config --auth gitlab-token.gitlab.choosit.com ${GITLAB_TOKEN} --no-ansi --no-interaction
-
-.PHONY: copy-files
-copy-files:
-	$(MAKE) copy-pre-commit
-	$(MAKE) copy-settings-php
+	docker exec $(DOCKER_PHP_ID) composer --working-dir=$(COMPOSER_ROOT) config --auth gitlab-token.gitlab.choosit.com ${GITLAB_TOKEN} --no-ansi --no-interaction
 
 .PHONY: copy-env-file
 copy-env-file:
@@ -158,35 +139,11 @@ copy-env-file:
 copy-pre-commit:
 	cp docker_utils/pre-commit ./project/.git/hooks/pre-commit
 
-.PHONY: copy-settings-php
-copy-settings-php:
-	cp docker_utils/default.settings.php ./project/web/sites/default/settings.php
-
-.PHONY: drupal-install
-drupal-install:
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") drush -r $(DRUPAL_ROOT) site:install minimal -y --account-name=${INSTALL_ACCOUNT_NAME} --account-pass=${INSTALL_ACCOUNT_PASS} --account-mail=${INSTALL_ACCOUNT_MAIL} --existing-config
-
-.PHONY: drupal-init
-drupal-init:
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") drush -r $(DRUPAL_ROOT) site:install -y --db-url=${DB_DRIVER}://root:${DB_ROOT_PASSWORD}@${DB_HOST}/${DB_NAME} --account-name=${INSTALL_ACCOUNT_NAME} --account-pass=${INSTALL_ACCOUNT_PASS} --account-mail=${INSTALL_ACCOUNT_MAIL}
-
-.PHONY: packages
-packages:
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_node' --format "{{ .ID }}") npm install
-
-.PHONY: build
-build:
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_node' --format "{{ .ID }}") npm run build
-
 .PHONY: restore-dump
 restore-dump:
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") drush -r $(DRUPAL_ROOT) sql-drop -y
-	docker exec -i $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") gunzip -c $(filter-out $@,$(MAKECMDGOALS)) | docker exec -i $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") drush -r $(DRUPAL_ROOT) sql-cli
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") drush -r $(DRUPAL_ROOT) uli
-
-.PHONY: backup
-backup:
-	docker exec $(shell docker ps --filter name='^/$(PROJECT_NAME)_php' --format "{{ .ID }}") drush -r $(DRUPAL_ROOT) sql-dump --result-file=auto --gzip
+	docker exec $(DOCKER_PHP_ID) php bin/console doctrine:database:drop --force
+	docker exec $(DOCKER_PHP_ID) php bin/console doctrine:database:create
+	docker exec -i $(DOCKER_PHP_ID) gunzip -c $(filter-out $@,$(MAKECMDGOALS)) | docker exec -i $(DOCKER_PHP_ID) php bin/console doctrine:database:import
 
 # https://stackoverflow.com/a/6273809/1826109
 %:
