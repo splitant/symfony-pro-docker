@@ -98,6 +98,7 @@ services:
 #    - ./postgres-init:/docker-entrypoint-initdb.d # Place init file(s) here.
 #    - /path/to/postgres/data/on/host:/var/lib/postgresql/data # Use bind mount
 
+  # https://www.garybell.co.uk/symfony-profiler-not-working-on-apache/
   apache:
     image: wodby/apache:$APACHE_TAG
     container_name: "${PROJECT_NAME}_apache"
