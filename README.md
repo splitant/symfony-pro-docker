@@ -37,3 +37,17 @@ The goal is to set up fastly a local Symfony project with docker environment for
    # Fill env file
    make init
    ```
+
+## Make commands
+
+### Connect to Prestashop container
+
+  ```sh
+  make shell
+  ```
+
+### Reset project
+
+  ```sh
+  make prune
+  ```
